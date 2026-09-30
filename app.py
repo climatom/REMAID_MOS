@@ -48,7 +48,7 @@ VARIABLES = {
     # label: (column, unit)
     "2 m temperature": ("t2m_C", "°C"),
     "2 m dewpoint": ("td2m_C", "°C"),
-    "2 m specific humidity": ("q2m_gkg", "g/kg"),
+    "2 m wet-bulb temperature": ("tw2m_C", "°C"),
     "10 m wind speed": ("wspd10_ms", "m/s"),
     "Wind gust": ("gust_ms", "m/s"),
     "Precipitation (interval)": ("precip_mm", "mm"),
@@ -153,31 +153,6 @@ def precip_panel(df: pd.DataFrame, x_title: str) -> alt.LayerChart:
     )
 
 
-def temp_humidity_panel(df: pd.DataFrame, x_title: str) -> alt.LayerChart:
-    """Temperature (left axis) and specific humidity (right axis) on shared time axis."""
-    series = {"Temperature": ("t2m_C", C_ORANGE), "Specific humidity": ("q2m_gkg", C_BLUE)}
-    color = alt.Color("series:N", scale=alt.Scale(domain=list(series), range=[c for _, c in series.values()]),
-                      legend=alt.Legend(orient="top", title=None))
-    base = alt.Chart(df).encode(x=alt.X("time:T", title=x_title, axis=X_AXIS))
-    t_line = base.transform_calculate(series="'Temperature'").mark_line(
-        strokeWidth=2, interpolate="monotone").encode(
-        y=alt.Y("t2m_C:Q", title="Temperature (°C)", scale=alt.Scale(zero=False),
-                axis=alt.Axis(orient="left")), color=color)
-    q_line = base.transform_calculate(series="'Specific humidity'").mark_line(
-        strokeWidth=2, interpolate="monotone").encode(
-        y=alt.Y("q2m_gkg:Q", title="Specific humidity (g/kg)", scale=alt.Scale(zero=False),
-                axis=alt.Axis(orient="right", grid=False)), color=color)
-
-    tooltip = [
-        alt.Tooltip("time:T", title="Time", format="%a %d %b %H:%M"),
-        alt.Tooltip("t2m_C:Q", title="Temperature (°C)", format=".1f"),
-        alt.Tooltip("q2m_gkg:Q", title="Specific humidity (g/kg)", format=".2f"),
-    ]
-    hover = crosshair_layer(alt.Chart(df), df, tooltip)
-    return (alt.layer(t_line, q_line).resolve_scale(y="independent") + hover).properties(
-        title="2 m temperature and specific humidity", height=HEIGHT)
-
-
 def runs_panel(runs: pd.DataFrame, col: str, label: str, unit: str, x_title: str) -> alt.LayerChart:
     inits = sorted(runs["init_time_utc"].unique())
     runs = runs.copy()
@@ -250,9 +225,9 @@ with tab_fc:
     horizon = st.slider("Forecast horizon (hours)", 24, max_h, min(120, max_h), step=24)
     d = df[df["fxx"] <= horizon]
 
-    st.altair_chart(temp_humidity_panel(d, x_title), width="stretch")
-    st.altair_chart(line_panel(d, {"Dewpoint": ("td2m_C", C_BLUE)},
-                               "2 m dewpoint", "°C", x_title), width="stretch")
+    st.altair_chart(line_panel(d, {"Temperature": ("t2m_C", C_ORANGE), "Wet-bulb (Romps)": ("tw2m_C", C_AQUA),
+                                   "Dewpoint": ("td2m_C", C_BLUE)},
+                               "2 m temperature, wet-bulb and dewpoint", "°C", x_title), width="stretch")
     st.altair_chart(precip_panel(d, x_title), width="stretch")
     st.altair_chart(line_panel(d, {"10 m wind": ("wspd10_ms", C_BLUE), "Gust": ("gust_ms", C_ORANGE),
                                    "100 m wind": ("wspd100_ms", C_AQUA)},
@@ -273,7 +248,7 @@ with tab_runs:
                    "large jumps suggest low predictability.")
 
 with tab_table:
-    show = ["time", "fxx", "t2m_C", "q2m_gkg", "td2m_C", "wspd10_ms", "wdir10_deg", "gust_ms",
+    show = ["time", "fxx", "t2m_C", "tw2m_C", "td2m_C", "wspd10_ms", "wdir10_deg", "gust_ms",
             "wspd100_ms", "precip_mm", "precip_acc_mm", "sp_hPa", "mslp_hPa"]
     st.dataframe(df[show].rename(columns={"time": x_title}), hide_index=True, width="stretch")
     st.download_button("Download CSV (this site/run)", df.drop(columns="time").to_csv(index=False),
