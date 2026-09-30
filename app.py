@@ -48,13 +48,11 @@ VARIABLES = {
     # label: (column, unit)
     "2 m temperature": ("t2m_C", "°C"),
     "2 m dewpoint": ("td2m_C", "°C"),
-    "2 m relative humidity": ("rh2m_pct", "%"),
+    "2 m specific humidity": ("q2m_gkg", "g/kg"),
     "10 m wind speed": ("wspd10_ms", "m/s"),
     "Wind gust": ("gust_ms", "m/s"),
     "Precipitation (interval)": ("precip_mm", "mm"),
     "Accumulated precipitation": ("precip_acc_mm", "mm"),
-    "Surface pressure": ("sp_hPa", "hPa"),
-    "Mean sea-level pressure": ("mslp_hPa", "hPa"),
 }
 
 st.set_page_config(page_title="REMAID GFS forecast", layout="wide")
@@ -96,7 +94,7 @@ def add_display_time(df: pd.DataFrame, tz: str) -> pd.DataFrame:
 # Chart helpers
 # ============================================================
 
-HEIGHT = 190
+HEIGHT = 320  # default panel height (px); overridden by the sidebar slider
 X_AXIS = alt.Axis(format="%a %d %b", tickCount={"interval": "day", "step": 1}, labelAngle=0)
 
 
@@ -155,17 +153,29 @@ def precip_panel(df: pd.DataFrame, x_title: str) -> alt.LayerChart:
     )
 
 
-def wind_dir_panel(df: pd.DataFrame, x_title: str) -> alt.Chart:
-    return alt.Chart(df).mark_point(filled=True, size=40, color=C_BLUE).encode(
-        x=alt.X("time:T", title=x_title, axis=X_AXIS),
-        y=alt.Y("wdir10_deg:Q", title="degrees (from)",
-                scale=alt.Scale(domain=[0, 360]), axis=alt.Axis(values=[0, 90, 180, 270, 360])),
-        tooltip=[
-            alt.Tooltip("time:T", title="Time", format="%a %d %b %H:%M"),
-            alt.Tooltip("wdir10_deg:Q", title="Direction (°)", format=".0f"),
-            alt.Tooltip("wspd10_ms:Q", title="Speed (m/s)", format=".1f"),
-        ],
-    ).properties(title="10 m wind direction (N=0/360, E=90, S=180, W=270)", height=150)
+def temp_humidity_panel(df: pd.DataFrame, x_title: str) -> alt.LayerChart:
+    """Temperature (left axis) and specific humidity (right axis) on shared time axis."""
+    series = {"Temperature": ("t2m_C", C_ORANGE), "Specific humidity": ("q2m_gkg", C_BLUE)}
+    color = alt.Color("series:N", scale=alt.Scale(domain=list(series), range=[c for _, c in series.values()]),
+                      legend=alt.Legend(orient="top", title=None))
+    base = alt.Chart(df).encode(x=alt.X("time:T", title=x_title, axis=X_AXIS))
+    t_line = base.transform_calculate(series="'Temperature'").mark_line(
+        strokeWidth=2, interpolate="monotone").encode(
+        y=alt.Y("t2m_C:Q", title="Temperature (°C)", scale=alt.Scale(zero=False),
+                axis=alt.Axis(orient="left")), color=color)
+    q_line = base.transform_calculate(series="'Specific humidity'").mark_line(
+        strokeWidth=2, interpolate="monotone").encode(
+        y=alt.Y("q2m_gkg:Q", title="Specific humidity (g/kg)", scale=alt.Scale(zero=False),
+                axis=alt.Axis(orient="right", grid=False)), color=color)
+
+    tooltip = [
+        alt.Tooltip("time:T", title="Time", format="%a %d %b %H:%M"),
+        alt.Tooltip("t2m_C:Q", title="Temperature (°C)", format=".1f"),
+        alt.Tooltip("q2m_gkg:Q", title="Specific humidity (g/kg)", format=".2f"),
+    ]
+    hover = crosshair_layer(alt.Chart(df), df, tooltip)
+    return (alt.layer(t_line, q_line).resolve_scale(y="independent") + hover).properties(
+        title="2 m temperature and specific humidity", height=HEIGHT)
 
 
 def runs_panel(runs: pd.DataFrame, col: str, label: str, unit: str, x_title: str) -> alt.LayerChart:
@@ -188,7 +198,7 @@ def runs_panel(runs: pd.DataFrame, col: str, label: str, unit: str, x_title: str
             alt.Tooltip(f"{col}:Q", title=label, format=".1f"),
         ],
     )
-    return lines.properties(title=f"{label}: last {len(domain)} runs", height=320)
+    return lines.properties(title=f"{label}: last {len(domain)} runs", height=int(HEIGHT * 1.4))
 
 
 # ============================================================
@@ -196,6 +206,8 @@ def runs_panel(runs: pd.DataFrame, col: str, label: str, unit: str, x_title: str
 # ============================================================
 
 st.title("REMAID — GFS 0.25° point forecast")
+
+HEIGHT = st.sidebar.slider("Chart height (px)", 200, 600, HEIGHT, step=20)
 
 try:
     latest = load("latest")
@@ -235,24 +247,16 @@ tab_fc, tab_runs, tab_table = st.tabs(["Forecast", "Run-to-run comparison", "Tab
 
 with tab_fc:
     max_h = int(df["fxx"].max())
-    horizon = st.slider("Forecast horizon (hours)", 24, max_h, min(168, max_h), step=24)
+    horizon = st.slider("Forecast horizon (hours)", 24, max_h, min(120, max_h), step=24)
     d = df[df["fxx"] <= horizon]
 
-    st.altair_chart(line_panel(d, {"Temperature": ("t2m_C", C_ORANGE), "Dewpoint": ("td2m_C", C_BLUE)},
-                               "2 m temperature and dewpoint", "°C", x_title), width="stretch")
-    st.altair_chart(line_panel(d, {"Relative humidity": ("rh2m_pct", C_BLUE)},
-                               "2 m relative humidity", "%", x_title, zero=True), width="stretch")
+    st.altair_chart(temp_humidity_panel(d, x_title), width="stretch")
+    st.altair_chart(line_panel(d, {"Dewpoint": ("td2m_C", C_BLUE)},
+                               "2 m dewpoint", "°C", x_title), width="stretch")
     st.altair_chart(precip_panel(d, x_title), width="stretch")
     st.altair_chart(line_panel(d, {"10 m wind": ("wspd10_ms", C_BLUE), "Gust": ("gust_ms", C_ORANGE),
                                    "100 m wind": ("wspd100_ms", C_AQUA)},
                                "Wind speed", "m/s", x_title, zero=True), width="stretch")
-    st.altair_chart(wind_dir_panel(d, x_title), width="stretch")
-
-    p_choice = st.radio("Pressure", ["Mean sea-level pressure", "Surface pressure (model orography)"],
-                        horizontal=True)
-    p_col = "mslp_hPa" if p_choice.startswith("Mean") else "sp_hPa"
-    st.altair_chart(line_panel(d, {p_choice: (p_col, C_BLUE)}, p_choice, "hPa", x_title),
-                    width="stretch")
 
 with tab_runs:
     try:
@@ -269,7 +273,7 @@ with tab_runs:
                    "large jumps suggest low predictability.")
 
 with tab_table:
-    show = ["time", "fxx", "t2m_C", "td2m_C", "rh2m_pct", "wspd10_ms", "wdir10_deg", "gust_ms",
+    show = ["time", "fxx", "t2m_C", "q2m_gkg", "td2m_C", "wspd10_ms", "wdir10_deg", "gust_ms",
             "wspd100_ms", "precip_mm", "precip_acc_mm", "sp_hPa", "mslp_hPa"]
     st.dataframe(df[show].rename(columns={"time": x_title}), hide_index=True, width="stretch")
     st.download_button("Download CSV (this site/run)", df.drop(columns="time").to_csv(index=False),
