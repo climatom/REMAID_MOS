@@ -180,7 +180,7 @@ def runs_panel(runs: pd.DataFrame, col: str, label: str, unit: str, x_title: str
 # Page
 # ============================================================
 
-st.title("REMAID — GFS 0.25° point forecast")
+st.title("REMAID — GFS (0.25°) forecast")
 
 HEIGHT = st.sidebar.slider("Chart height (px)", 200, 600, HEIGHT, step=20)
 
